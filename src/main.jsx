@@ -1,108 +1,50 @@
-import React,{useRef,useState,useMemo,useEffect} from 'react';
+import React,{useEffect,useRef,useState} from 'react';
 import {createRoot} from 'react-dom/client';
-import {Canvas} from '@react-three/fiber';
-import {OrbitControls,Grid,TransformControls,useGLTF} from '@react-three/drei';
-import * as THREE from 'three';
-import {Box,Film,Music,Type,Layers,Settings,Play,Pause,Plus,Upload,Undo2,Redo2,Save,Download,Trash2,MousePointer2,Move3d,Circle,Square,Rotate3d,Maximize2} from 'lucide-react';
+import {Upload,Undo2,Redo2,Save,Download,Trash2,Plus,Play,Pause,SkipBack,SkipForward,Scissors,Type,Music,Film,Layers,Settings,Volume2,VolumeX,Maximize2} from 'lucide-react';
 import './styles.css';
 
-const tools=[['Media',Upload],['3D Objects',Box],['Text',Type],['Audio',Music],['Effects',Layers]];
-const kind=f=>f.type.startsWith('video')?'video':f.type.startsWith('image')?'image':f.type.startsWith('audio')?'audio':/\.(glb|gltf|obj)$/i.test(f.name)?'model':'file';
+const tools=[['Media',Upload],['Text',Type],['Audio',Music],['Effects',Layers]];
+const kind=f=>f.type.startsWith('video/')?'video':f.type.startsWith('image/')?'image':f.type.startsWith('audio/')?'audio':'file';
+const fmt=s=>{s=Math.max(0,Number(s)||0);return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(Math.floor(s%60)).padStart(2,'0')}`};
 
-function Model({asset,onSelect,innerRef}){const {scene}=useGLTF(asset.url);const clone=useMemo(()=>scene.clone(true),[scene]);return <primitive ref={innerRef} object={clone} scale={asset.scale} position={asset.position} rotation={asset.rotation} onClick={e=>{e.stopPropagation();onSelect(asset.id)}}/>}
-function Primitive({asset,onSelect,innerRef}){const geo=asset.shape==='sphere'?<sphereGeometry args={[1,12,8]}/>:asset.shape==='plane'?<planeGeometry args={[2,2]}/>:<boxGeometry args={[1.6,1.2,1.1]}/>;return <mesh ref={innerRef} position={asset.position} rotation={asset.rotation} scale={asset.scale} onClick={e=>{e.stopPropagation();onSelect(asset.id)}}>{geo}<meshStandardMaterial color="#8d98aa" metalness={.15} roughness={.6}/></mesh>}
-
-function BasicMedia({asset,onSelect,innerRef,active,playing}){
- const [texture,setTexture]=useState(null);
- const [aspect,setAspect]=useState(1.6667);
- const videoRef=useRef(null);
- useEffect(()=>{
-  let disposed=false;
-  let video=null;
-  let mediaTexture=null;
-  let loadedImage=null;
-  if(asset.kind==='video'&&active){
-   video=document.createElement('video');
-   video.src=asset.url;
-   video.muted=true;
-   video.defaultMuted=true;
-   video.loop=true;
-   video.playsInline=true;
-   video.setAttribute('playsinline','');
-   video.preload='auto';
-   videoRef.current=video;
-   const makeTexture=()=>{
-    if(disposed||mediaTexture||video.readyState<2)return;
-    setAspect(video.videoWidth&&video.videoHeight?video.videoWidth/video.videoHeight:1.6667);
-    mediaTexture=new THREE.VideoTexture(video);
-    mediaTexture.colorSpace=THREE.SRGBColorSpace;
-    mediaTexture.minFilter=THREE.LinearFilter;
-    mediaTexture.magFilter=THREE.LinearFilter;
-    mediaTexture.generateMipmaps=false;
-    mediaTexture.wrapS=THREE.ClampToEdgeWrapping;
-    mediaTexture.wrapT=THREE.ClampToEdgeWrapping;
-    mediaTexture.needsUpdate=true;
-    setTexture(mediaTexture);
-    if(playing)video.play().catch(()=>{});
-   };
-   video.addEventListener('loadedmetadata',makeTexture);
-   video.addEventListener('canplay',makeTexture);
-   video.addEventListener('loadeddata',makeTexture);
-   video.load();
-   return()=>{
-    disposed=true;
-    video.pause();
-    video.removeAttribute('src');
-    video.load();
-    videoRef.current=null;
-    if(mediaTexture)mediaTexture.dispose();
-    setTexture(null);
-   };
-  }
-  if(asset.kind==='image'){
-   const loader=new THREE.TextureLoader();
-   loader.load(asset.url,t=>{
-    if(disposed){t.dispose();return;}
-    loadedImage=t;
-    t.colorSpace=THREE.SRGBColorSpace;
-    t.minFilter=THREE.LinearFilter;
-    t.magFilter=THREE.LinearFilter;
-    t.generateMipmaps=false;
-    setAspect(t.image?.width&&t.image?.height?t.image.width/t.image.height:1.6667);
-    setTexture(t);
-   });
-  }
-  return()=>{
-   disposed=true;
-   if(loadedImage)loadedImage.dispose();
-   setTexture(null);
-  };
- },[asset.kind,asset.url,active]);
- useEffect(()=>{
-  const v=videoRef.current;
-  if(!v)return;
-  if(playing)v.play().catch(()=>{});
-  else v.pause();
- },[playing,texture]);
- const visual=asset.kind==='video'||asset.kind==='image';
- const h=2/aspect;
- return <mesh ref={innerRef} position={asset.position} rotation={asset.rotation} scale={asset.scale} onClick={e=>{e.stopPropagation();onSelect(asset.id)}}>
-   <planeGeometry args={[2,h]}/>
-   <meshBasicMaterial color={visual&&texture?'#ffffff':'#465064'} map={texture||null} side={THREE.DoubleSide} toneMapped={false}/>
- </mesh>
+function App(){
+ const [active,setActive]=useState('Media'),[assets,setAssets]=useState([]),[selected,setSelected]=useState(null),[playing,setPlaying]=useState(false),[time,setTime]=useState(0),[durations,setDurations]=useState({}),[muted,setMuted]=useState(false),[project,setProject]=useState('Untitled Project'),[text,setText]=useState('');
+ const input=useRef(),video=useRef(),audio=useRef(),raf=useRef();
+ const sel=assets.find(a=>a.id===selected)||assets.find(a=>a.kind==='video')||assets[0];
+ const d=sel?.kind==='image'?5:(durations[sel?.id]||sel?.duration||5);
+ const addFiles=e=>{const files=[...e.target.files||[]];if(!files.length)return;const next=files.map(f=>({id:crypto.randomUUID(),name:f.name,type:f.type,size:f.size,kind:kind(f),url:URL.createObjectURL(f),duration:f.type.startsWith('image/')?5:0,start:0,end:0}));setAssets(a=>[...a,...next]);setSelected(next[0].id);e.target.value=''};
+ const remove=id=>{setAssets(a=>{const x=a.find(v=>v.id===id);if(x?.url)URL.revokeObjectURL(x.url);return a.filter(v=>v.id!==id)});if(selected===id){setSelected(null);setPlaying(false)}};
+ const choose=id=>{video.current?.pause();audio.current?.pause();setPlaying(false);setTime(0);setSelected(id)};
+ const toggle=()=>{if(!sel)return;if(sel.kind==='video'){if(!video.current)return;playing?video.current.pause():video.current.play().catch(()=>{});setPlaying(!playing)}else if(sel.kind==='audio'){if(!audio.current)return;playing?audio.current.pause():audio.current.play().catch(()=>{});setPlaying(!playing)}else setPlaying(!playing)};
+ const seek=e=>{const r=e.currentTarget.getBoundingClientRect(),t=Math.max(0,Math.min(1,(e.clientX-r.left)/r.width))*d;setTime(t);if(video.current&&sel?.kind==='video')video.current.currentTime=t;if(audio.current&&sel?.kind==='audio')audio.current.currentTime=t};
+ const onMeta=e=>{const value=e.currentTarget.duration||5;setDurations(x=>({...x,[sel?.id]:value}));setAssets(a=>a.map(v=>v.id===sel?.id?{...v,duration:value,end:value}:v))};
+ const addText=()=>{const value=text.trim()||'Your Text';const id=crypto.randomUUID();setAssets(a=>[...a,{id,name:value,type:'text',size:0,kind:'text',url:null,duration:5,start:0,end:5,text:value}]);setSelected(id);setText('')};
+ useEffect(()=>{if(video.current)video.current.muted=muted;if(audio.current)audio.current.muted=muted},[muted]);
+ useEffect(()=>()=>assets.forEach(a=>a.url&&URL.revokeObjectURL(a.url)),[]);
+ return <div className="app">
+  <header><div className="brand"><div className="logo">D</div><div><b>DepthCut</b><small>VIDEO EDITOR</small></div></div><input className="project" value={project} onChange={e=>setProject(e.target.value)}/><div className="actions"><button title="Undo"><Undo2/></button><button title="Redo"><Redo2/></button><button><Save/><span>Save</span></button><button className="export"><Download/><span>Export</span></button></div></header>
+  <div className="editor">
+   <aside className="sidebar">{tools.map(([n,I])=><button key={n} className={active===n?'active':''} onClick={()=>setActive(n)}><I/><span>{n}</span></button>)}<div className="spacer"/><button><Settings/><span>Settings</span></button></aside>
+   <section className="mediaPanel"><div className="panelTitle"><b>{active}</b>{active==='Media'&&<label className="add"><Plus/> Add Media<input ref={input} type="file" multiple accept="video/*,image/*,audio/*" onChange={addFiles}/></label>}</div>
+    {active==='Media'&&<div className="assetGrid">{assets.filter(a=>a.kind!=='text').map(a=><div className={'asset '+(selected===a.id?'selected':'')} key={a.id} onClick={()=>choose(a.id)}><div className="thumb">{a.kind==='video'&&<video src={a.url} muted playsInline preload="metadata"/>}{a.kind==='image'&&<img src={a.url} alt="" loading="lazy"/>}{a.kind==='audio'&&<Music/>}{a.kind==='file'&&<Film/>}</div><span title={a.name}>{a.name}</span><button className="assetDelete" onClick={e=>{e.stopPropagation();remove(a.id)}}><Trash2/></button></div>)}{!assets.length&&<div className="empty" onClick={()=>input.current?.click()}><Upload/><b>Import videos, photos & audio</b><small>MP4 · MOV · WebM · JPG · PNG · MP3 · WAV</small></div>}</div>}
+    {active==='Text'&&<div className="toolBox"><h3>Text</h3><input value={text} onChange={e=>setText(e.target.value)} placeholder="Enter text"/><button className="primary" onClick={addText}><Plus/> Add to timeline</button></div>}
+    {active==='Audio'&&<div className="toolBox"><h3>Audio</h3><p>Import audio from Media, then select it on the timeline.</p></div>}
+    {active==='Effects'&&<div className="toolBox"><h3>Effects</h3><button>Brightness</button><button>Contrast</button><button>Blur</button><button>Fade</button></div>}
+   </section>
+   <main className="previewArea"><div className="previewTop"><span>Preview</span><button><Maximize2/></button></div><div className="previewStage">
+    {sel?.kind==='video'&&<video ref={video} className="previewMedia" src={sel.url} playsInline preload="metadata" onLoadedMetadata={onMeta} onTimeUpdate={e=>setTime(e.currentTarget.currentTime)} onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)} onEnded={()=>setPlaying(false)}/>} 
+    {sel?.kind==='image'&&<img className="previewMedia" src={sel.url} alt="Preview"/>}
+    {sel?.kind==='text'&&<div className="textPreview">{sel.text}</div>}
+    {sel?.kind==='audio'&&<><div className="audioPreview"><Music/><b>{sel.name}</b></div><audio ref={audio} src={sel.url} onTimeUpdate={e=>setTime(e.currentTarget.currentTime)} onPlay={()=>setPlaying(true)} onPause={()=>setPlaying(false)} onEnded={()=>setPlaying(false)}/></>}
+    {!sel&&<div className="previewEmpty"><Film/><b>Start editing</b><span>Import a video or photo</span></div>}
+   </div><div className="transport"><button onClick={()=>{setTime(0);if(video.current)video.current.currentTime=0;if(audio.current)audio.current.currentTime=0}}><SkipBack/></button><button className="play" onClick={toggle}>{playing?<Pause fill="currentColor"/>:<Play fill="currentColor"/>}</button><button onClick={()=>{const t=Math.min(d,time+5);setTime(t);if(video.current)video.current.currentTime=t;if(audio.current)audio.current.currentTime=t}}><SkipForward/></button><span>{fmt(time)} / {fmt(d)}</span><div className="transportSpace"/><button onClick={()=>setMuted(v=>!v)}>{muted?<VolumeX/>:<Volume2/>}</button></div></main>
+  </div>
+  <footer className="timeline"><div className="timelineHead"><div><b>Timeline</b><span>{fmt(time)} / {fmt(assets.reduce((s,a)=>s+(durations[a.id]||a.duration||5),0))}</span></div><div className="timelineTools"><button title="Split"><Scissors/></button></div></div><div className="timelineBody"><div className="trackLabels"><span>🎬 Video</span><span>🖼 Overlay</span><span>🔊 Audio</span></div><div className="trackScroll"><div className="ruler">{[0,5,10,15,20,25,30].map(x=><span key={x}>{fmt(x)}</span>)}</div><div className="tracks" onClick={seek}>
+    {assets.filter(a=>a.kind==='video').map((a,i)=><div key={a.id} className={'clip videoClip '+(selected===a.id?'selectedClip':'')} style={{left:`${i*18}%`,width:'17%'}} onClick={e=>{e.stopPropagation();choose(a.id)}}><video src={a.url} muted preload="metadata"/><span>{a.name}</span></div>)}
+    {assets.filter(a=>a.kind==='image'||a.kind==='text').map((a,i)=><div key={a.id} className={'clip overlayClip '+(selected===a.id?'selectedClip':'')} style={{left:`${i*18}%`,width:'17%'}} onClick={e=>{e.stopPropagation();choose(a.id)}}>{a.kind==='image'?<img src={a.url} alt=""/>:a.text}</div>)}
+    {assets.filter(a=>a.kind==='audio').map((a,i)=><div key={a.id} className="clip audioClip" style={{left:`${i*18}%`,width:'17%'}} onClick={e=>{e.stopPropagation();choose(a.id)}}><Music/> {a.name}</div>)}
+    <div className="timelineCursor" style={{left:`${Math.min(99,Math.max(0,(time/d)*100))}%`}}/>
+   </div></div></div></footer>
+ </div>
 }
-
-function SceneObject({asset,onSelect,selected,transformMode,onTransform,playing}){const ref=useRef();const child=asset.kind==='model'?<Model asset={asset} onSelect={onSelect} innerRef={ref}/>:asset.kind==='primitive'?<Primitive asset={asset} onSelect={onSelect} innerRef={ref}/>:<BasicMedia asset={asset} onSelect={onSelect} innerRef={ref} active={selected} playing={playing}/>;if(!selected)return child;return <TransformControls mode={transformMode} onMouseUp={()=>{if(ref.current)onTransform(asset.id,ref.current)}}>{child}</TransformControls>}
-
-function Viewport({assets,selected,setSelected,transformMode,onTransform,playing}){const visible=assets.slice(0,32);return <Canvas camera={{position:[4,3,6],fov:45,near:.1,far:1000}} dpr={[1,1.25]} gl={{antialias:false,powerPreference:'high-performance'}} onCreated={({gl})=>{gl.outputColorSpace=THREE.SRGBColorSpace;gl.setPixelRatio(Math.min(window.devicePixelRatio||1,1.25))}} onPointerMissed={()=>setSelected(null)}><color attach="background" args={['#080a0f']}/><ambientLight intensity={1}/><directionalLight position={[4,6,4]} intensity={1.5}/><Grid args={[16,16]} cellSize={1} cellThickness={.35} sectionSize={4} sectionThickness={.7} fadeDistance={18} fadeStrength={1}/><OrbitControls makeDefault enableDamping={false} enablePan enableZoom/><group>{visible.map(a=><SceneObject key={a.id} asset={a} selected={selected===a.id} onSelect={setSelected} transformMode={transformMode} onTransform={onTransform} playing={playing}/>)}</group>{!assets.length&&<mesh><boxGeometry args={[1.5,1.5,1.5]}/><meshStandardMaterial wireframe/></mesh>}</Canvas>}
-
-function App(){const [active,setActive]=useState('Media'),[playing,setPlaying]=useState(false),[assets,setAssets]=useState([]),[selected,setSelected]=useState(null),[project,setProject]=useState('Untitled Project'),[transformMode,setTransformMode]=useState('translate');const input=useRef();
- const addFiles=e=>{const files=Array.from(e.target.files||[]);if(!files.length)return;const next=files.map(f=>({id:crypto.randomUUID(),name:f.name,type:f.type,size:f.size,kind:kind(f),url:URL.createObjectURL(f),position:[0,0,0],rotation:[0,0,0],scale:[1,1,1]}));setAssets(a=>[...a,...next]);setSelected(next[0].id);e.target.value=''};
- const addPrimitive=shape=>{const id=crypto.randomUUID();setAssets(a=>[...a,{id,name:shape[0].toUpperCase()+shape.slice(1),type:'3d',size:0,kind:'primitive',shape,url:null,position:[0,0,0],rotation:[0,0,0],scale:[1,1,1]}]);setSelected(id)};
- const remove=id=>{setAssets(a=>{const item=a.find(x=>x.id===id);if(item?.url)URL.revokeObjectURL(item.url);return a.filter(x=>x.id!==id)});if(selected===id)setSelected(null)};
- const updateSelected=(key,value)=>setAssets(a=>a.map(x=>x.id===selected?{...x,[key]:value}:x));
- const onTransform=(id,obj)=>setAssets(a=>a.map(x=>x.id===id?{...x,position:[obj.position.x,obj.position.y,obj.position.z],rotation:[obj.rotation.x,obj.rotation.y,obj.rotation.z],scale:[obj.scale.x,obj.scale.y,obj.scale.z]}:x));
- const sel=assets.find(a=>a.id===selected);
- useEffect(()=>()=>assets.forEach(a=>{if(a.url)URL.revokeObjectURL(a.url)}),[]);
- return <div className="app"><header><div className="brand"><div className="logo">D</div><div><b>DepthCut</b><small>3D VIDEO EDITOR</small></div></div><input className="project" value={project} onChange={e=>setProject(e.target.value)}/><div className="actions"><button title="Undo"><Undo2/></button><button title="Redo"><Redo2/></button><button><Save/> <span>Save</span></button><button className="export"><Download/> <span>Export</span></button></div></header><div className="workspace"><aside className="sidebar">{tools.map(([n,I])=><button className={active===n?'active':''} onClick={()=>setActive(n)} key={n}><I/><span>{n}</span></button>)}<div className="spacer"/><button><Settings/><span>Settings</span></button></aside><section className="assets"><div className="panelTitle"><b>{active}</b><label className="add"><Plus/> Add Media<input ref={input} type="file" multiple accept="video/*,image/*,audio/*,.glb,.gltf,.obj" onChange={addFiles}/></label></div>{active==='3D Objects'&&<div className="primitiveBar"><button onClick={()=>addPrimitive('cube')}><Box/>Cube</button><button onClick={()=>addPrimitive('sphere')}><Circle/>Sphere</button><button onClick={()=>addPrimitive('plane')}><Square/>Plane</button></div>}<div className="assetGrid">{assets.map(a=><div className={'asset '+(selected===a.id?'selected':'')} key={a.id} onClick={()=>setSelected(a.id)}><div className="thumb">{a.kind==='video'&&<video src={a.url} muted playsInline preload="metadata"/ >}{a.kind==='image'&&<img src={a.url} alt="" loading="lazy"/>}{a.kind==='audio'&&<Music/>}{a.kind==='model'&&<Box/>}{a.kind==='primitive'&&(a.shape==='sphere'?<Circle/>:a.shape==='plane'?<Square/>:<Box/>)}{a.kind==='file'&&<Film/>}</div><span title={a.name}>{a.name}</span><button className="assetDelete" onClick={e=>{e.stopPropagation();remove(a.id)}}><Trash2/></button></div>)}{!assets.length&&<div className="empty" onClick={()=>input.current?.click()}><Upload/><b>Import your media</b><small>Video · Images · Audio · GLB · GLTF · OBJ</small></div>}</div></section><main className="viewport"><div className="viewportTop"><span>Perspective</span><span className="transformTools"><button onClick={()=>setTransformMode('translate')} className={transformMode==='translate'?'activeTool':''}><Move3d/></button><button onClick={()=>setTransformMode('rotate')} className={transformMode==='rotate'?'activeTool':''}><Rotate3d/></button><button onClick={()=>setTransformMode('scale')} className={transformMode==='scale'?'activeTool':''}><Maximize2/></button></span></div><div className="scene"><Viewport assets={assets} selected={selected} setSelected={setSelected} transformMode={transformMode} onTransform={onTransform} playing={playing}/><div className="hint"><MousePointer2/> DRAG · PINCH ZOOM · SELECT</div></div><div className="transport"><button onClick={()=>setPlaying(p=>!p)}>{playing?<Pause fill="currentColor"/>:<Play fill="currentColor"/>}</button><span>00:00:00:00</span><div className="scrub"/></div></main><aside className="inspector"><div className="panelTitle"><b>Inspector</b></div>{sel?<div className="properties"><b>Selected object</b><p title={sel.name}>{sel.name}</p><div className="propertyGrid"><label>X<input type="number" value={sel.position[0]} onChange={e=>updateSelected('position',[+e.target.value,sel.position[1],sel.position[2]])}/></label><label>Y<input type="number" value={sel.position[1]} onChange={e=>updateSelected('position',[sel.position[0],+e.target.value,sel.position[2]])}/></label><label>Z<input type="number" value={sel.position[2]} onChange={e=>updateSelected('position',[sel.position[0],sel.position[1],+e.target.value])}/></label></div><div className="propertyGrid"><label>Rot X<input type="number" value={sel.rotation[0]} onChange={e=>updateSelected('rotation',[+e.target.value,sel.rotation[1],sel.rotation[2]])}/></label><label>Rot Y<input type="number" value={sel.rotation[1]} onChange={e=>updateSelected('rotation',[sel.rotation[0],+e.target.value,sel.rotation[2]])}/></label><label>Rot Z<input type="number" value={sel.rotation[2]} onChange={e=>updateSelected('rotation',[sel.rotation[0],sel.rotation[1],+e.target.value])}/></label></div><label>Uniform Scale<input type="number" value={sel.scale[0]} step="0.1" onChange={e=>{const n=+e.target.value;updateSelected('scale',[n,n,n])}}/></label></div>:<div className="inspectorEmpty"><Layers/><b>No object selected</b><small>Select an object in the 3D viewport or Media panel.</small></div>}</aside></div><footer className="timeline"><div className="timelineHead"><b>Timeline</b><span>00:00 / 00:00</span><div><button>+</button><button>−</button></div></div><div className="tracks"><div className="trackLabels"><span>🎥 Video 1</span><span>🧊 3D Scene</span><span>🔊 Audio 1</span></div><div className="ruler"><span>00:00</span><span>00:05</span><span>00:10</span><span>00:15</span><span>00:20</span></div><div className="trackArea">{assets.slice(0,8).map((a,i)=><div className={'clip '+(selected===a.id?'clipSelected':'')} key={a.id} style={{left:(i*12)+'%',width:'10%'}} onClick={()=>setSelected(a.id)}>{a.name}</div>)}<div className="playhead"/></div></div></footer></div>}
 createRoot(document.getElementById('root')).render(<App/>);
