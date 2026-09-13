@@ -1,0 +1,15 @@
+import React,{useState} from 'react';
+import {createRoot} from 'react-dom/client';
+import {Box,Film,Image,Music,Type,Layers,Settings,Play,Plus,Upload,Undo2,Redo2,Save,Download,Grid3X3} from 'lucide-react';
+import './styles.css';
+
+const tools=[['Media',Upload],['3D Objects',Box],['Text',Type],['Audio',Music],['Effects',Layers]];
+function App(){const [active,setActive]=useState('Media'); const [playing,setPlaying]=useState(false); const [assets,setAssets]=useState([]);
+const addFiles=e=>setAssets(a=>[...a,...Array.from(e.target.files||[]).map(f=>({name:f.name,type:f.type,size:f.size}))]);
+return <div className="app"><header><div className="brand"><div className="logo">D</div><div><b>DepthCut</b><small>3D VIDEO EDITOR</small></div></div><div className="project">Untitled Project <span>• Saved</span></div><div className="actions"><button title="Undo"><Undo2/></button><button title="Redo"><Redo2/></button><button><Save/> Save</button><button className="export"><Download/> Export</button></div></header>
+<div className="workspace"><aside className="sidebar">{tools.map(([n,I])=><button className={active===n?'active':''} onClick={()=>setActive(n)} key={n}><I/><span>{n}</span></button>)}<div className="spacer"/><button><Settings/><span>Settings</span></button></aside>
+<section className="assets"><div className="panelTitle"><b>{active}</b><label className="add"><Plus/> Add Media<input type="file" multiple accept="video/*,image/*,audio/*,.glb,.gltf,.obj" onChange={addFiles}/></label></div><div className="assetGrid">{assets.map((a,i)=><div className="asset" key={i}><div className="thumb">{a.type.startsWith('video')?<Film/>:a.type.startsWith('image')?<Image/>:a.type.startsWith('audio')?<Music/>:<Box/>}</div><span>{a.name}</span></div>)}{!assets.length&&<div className="empty"><Upload/><b>Import your media</b><small>Video, images, audio and 3D models</small></div>}</div></section>
+<main className="viewport"><div className="viewportTop"><span>Perspective</span><span><Grid3X3/> Scene View</span></div><div className="scene"><div className="grid"></div><div className="cube">D</div><div className="hint">3D VIEWPORT</div></div><div className="transport"><button onClick={()=>setPlaying(!playing)}><Play fill="currentColor"/></button><span>00:00:00:00</span><div className="scrub"/></div></main>
+<aside className="inspector"><div className="panelTitle"><b>Inspector</b></div><div className="inspectorEmpty"><Layers/><b>No object selected</b><small>Select an object to edit Transform, Material, Animation and more.</small></div></aside></div>
+<footer className="timeline"><div className="timelineHead"><b>Timeline</b><span>00:00 / 00:00</span><div><button>+</button><button>−</button></div></div><div className="tracks"><div className="trackLabels"><span>🎥 Video 1</span><span>🔊 Audio 1</span></div><div className="ruler"><span>00:00</span><span>00:05</span><span>00:10</span><span>00:15</span><span>00:20</span></div><div className="trackArea"><div className="playhead"/></div></div></footer></div>}
+createRoot(document.getElementById('root')).render(<App/>);
