@@ -10,24 +10,86 @@ const tools=[['Media',Upload],['3D Objects',Box],['Text',Type],['Audio',Music],[
 const kind=f=>f.type.startsWith('video')?'video':f.type.startsWith('image')?'image':f.type.startsWith('audio')?'audio':/\.(glb|gltf|obj)$/i.test(f.name)?'model':'file';
 
 function Model({asset,onSelect,innerRef}){const {scene}=useGLTF(asset.url);const clone=useMemo(()=>scene.clone(true),[scene]);return <primitive ref={innerRef} object={clone} scale={asset.scale} position={asset.position} rotation={asset.rotation} onClick={e=>{e.stopPropagation();onSelect(asset.id)}}/>}
-function Primitive({asset,onSelect,innerRef}){const geo=asset.shape==='sphere'?<sphereGeometry args={[1,16,12]}/>:asset.shape==='plane'?<planeGeometry args={[2,2]}/>:<boxGeometry args={[1.6,1.2,1.1]}/>;return <mesh ref={innerRef} position={asset.position} rotation={asset.rotation} scale={asset.scale} onClick={e=>{e.stopPropagation();onSelect(asset.id)}}>{geo}<meshStandardMaterial color="#8d98aa" metalness={.15} roughness={.6}/></mesh>}
+function Primitive({asset,onSelect,innerRef}){const geo=asset.shape==='sphere'?<sphereGeometry args={[1,12,8]}/>:asset.shape==='plane'?<planeGeometry args={[2,2]}/>:<boxGeometry args={[1.6,1.2,1.1]}/>;return <mesh ref={innerRef} position={asset.position} rotation={asset.rotation} scale={asset.scale} onClick={e=>{e.stopPropagation();onSelect(asset.id)}}>{geo}<meshStandardMaterial color="#8d98aa" metalness={.15} roughness={.6}/></mesh>}
 
 function BasicMedia({asset,onSelect,innerRef,active,playing}){
- const [texture,setTexture]=useState(null);const videoRef=useRef(null);
+ const [texture,setTexture]=useState(null);
+ const [aspect,setAspect]=useState(1.6667);
+ const videoRef=useRef(null);
  useEffect(()=>{
-  let disposed=false,video=null,objectTexture=null,loadedImage=null;
+  let disposed=false;
+  let video=null;
+  let mediaTexture=null;
+  let loadedImage=null;
   if(asset.kind==='video'&&active){
-   video=document.createElement('video');video.src=asset.url;video.muted=true;video.loop=true;video.playsInline=true;video.preload='auto';
-   const ready=()=>{if(disposed)return;objectTexture=new THREE.VideoTexture(video);objectTexture.colorSpace=THREE.SRGBColorSpace;objectTexture.minFilter=THREE.LinearFilter;objectTexture.magFilter=THREE.LinearFilter;objectTexture.generateMipmaps=false;videoRef.current=video;setTexture(objectTexture);if(playing)video.play().catch(()=>{})};
-   video.addEventListener('loadeddata',ready,{once:true});video.load();
-  }else if(asset.kind==='image'){
-   const loader=new THREE.TextureLoader();loader.load(asset.url,t=>{if(disposed){t.dispose();return}loadedImage=t;t.colorSpace=THREE.SRGBColorSpace;t.minFilter=THREE.LinearFilter;t.magFilter=THREE.LinearFilter;t.generateMipmaps=false;setTexture(t)});
+   video=document.createElement('video');
+   video.src=asset.url;
+   video.muted=true;
+   video.defaultMuted=true;
+   video.loop=true;
+   video.playsInline=true;
+   video.setAttribute('playsinline','');
+   video.preload='auto';
+   videoRef.current=video;
+   const makeTexture=()=>{
+    if(disposed||mediaTexture||video.readyState<2)return;
+    setAspect(video.videoWidth&&video.videoHeight?video.videoWidth/video.videoHeight:1.6667);
+    mediaTexture=new THREE.VideoTexture(video);
+    mediaTexture.colorSpace=THREE.SRGBColorSpace;
+    mediaTexture.minFilter=THREE.LinearFilter;
+    mediaTexture.magFilter=THREE.LinearFilter;
+    mediaTexture.generateMipmaps=false;
+    mediaTexture.wrapS=THREE.ClampToEdgeWrapping;
+    mediaTexture.wrapT=THREE.ClampToEdgeWrapping;
+    mediaTexture.needsUpdate=true;
+    setTexture(mediaTexture);
+    if(playing)video.play().catch(()=>{});
+   };
+   video.addEventListener('loadedmetadata',makeTexture);
+   video.addEventListener('canplay',makeTexture);
+   video.addEventListener('loadeddata',makeTexture);
+   video.load();
+   return()=>{
+    disposed=true;
+    video.pause();
+    video.removeAttribute('src');
+    video.load();
+    videoRef.current=null;
+    if(mediaTexture)mediaTexture.dispose();
+    setTexture(null);
+   };
   }
-  return()=>{disposed=true;if(video){video.pause();video.removeAttribute('src');video.load();videoRef.current=null}if(objectTexture)objectTexture.dispose();if(loadedImage)loadedImage.dispose();setTexture(null)};
+  if(asset.kind==='image'){
+   const loader=new THREE.TextureLoader();
+   loader.load(asset.url,t=>{
+    if(disposed){t.dispose();return;}
+    loadedImage=t;
+    t.colorSpace=THREE.SRGBColorSpace;
+    t.minFilter=THREE.LinearFilter;
+    t.magFilter=THREE.LinearFilter;
+    t.generateMipmaps=false;
+    setAspect(t.image?.width&&t.image?.height?t.image.width/t.image.height:1.6667);
+    setTexture(t);
+   });
+  }
+  return()=>{
+   disposed=true;
+   if(loadedImage)loadedImage.dispose();
+   setTexture(null);
+  };
  },[asset.kind,asset.url,active]);
- useEffect(()=>{const v=videoRef.current;if(!v)return;if(playing)v.play().catch(()=>{});else v.pause()},[playing]);
+ useEffect(()=>{
+  const v=videoRef.current;
+  if(!v)return;
+  if(playing)v.play().catch(()=>{});
+  else v.pause();
+ },[playing,texture]);
  const visual=asset.kind==='video'||asset.kind==='image';
- return <mesh ref={innerRef} position={asset.position} rotation={asset.rotation} scale={asset.scale} onClick={e=>{e.stopPropagation();onSelect(asset.id)}}><planeGeometry args={[2,1.2]}/><meshStandardMaterial color={visual&&texture?'#fff':'#465064'} map={texture||null} metalness={.05} roughness={.7} side={THREE.DoubleSide}/></mesh>
+ const h=2/aspect;
+ return <mesh ref={innerRef} position={asset.position} rotation={asset.rotation} scale={asset.scale} onClick={e=>{e.stopPropagation();onSelect(asset.id)}}>
+   <planeGeometry args={[2,h]}/>
+   <meshBasicMaterial color={visual&&texture?'#ffffff':'#465064'} map={texture||null} side={THREE.DoubleSide} toneMapped={false}/>
+ </mesh>
 }
 
 function SceneObject({asset,onSelect,selected,transformMode,onTransform,playing}){const ref=useRef();const child=asset.kind==='model'?<Model asset={asset} onSelect={onSelect} innerRef={ref}/>:asset.kind==='primitive'?<Primitive asset={asset} onSelect={onSelect} innerRef={ref}/>:<BasicMedia asset={asset} onSelect={onSelect} innerRef={ref} active={selected} playing={playing}/>;if(!selected)return child;return <TransformControls mode={transformMode} onMouseUp={()=>{if(ref.current)onTransform(asset.id,ref.current)}}>{child}</TransformControls>}
@@ -38,6 +100,9 @@ function App(){const [active,setActive]=useState('Media'),[playing,setPlaying]=u
  const addFiles=e=>{const files=Array.from(e.target.files||[]);if(!files.length)return;const next=files.map(f=>({id:crypto.randomUUID(),name:f.name,type:f.type,size:f.size,kind:kind(f),url:URL.createObjectURL(f),position:[0,0,0],rotation:[0,0,0],scale:[1,1,1]}));setAssets(a=>[...a,...next]);setSelected(next[0].id);e.target.value=''};
  const addPrimitive=shape=>{const id=crypto.randomUUID();setAssets(a=>[...a,{id,name:shape[0].toUpperCase()+shape.slice(1),type:'3d',size:0,kind:'primitive',shape,url:null,position:[0,0,0],rotation:[0,0,0],scale:[1,1,1]}]);setSelected(id)};
  const remove=id=>{setAssets(a=>{const item=a.find(x=>x.id===id);if(item?.url)URL.revokeObjectURL(item.url);return a.filter(x=>x.id!==id)});if(selected===id)setSelected(null)};
- const updateSelected=(key,value)=>setAssets(a=>a.map(x=>x.id===selected?{...x,[key]:value}:x));const onTransform=(id,obj)=>setAssets(a=>a.map(x=>x.id===id?{...x,position:[obj.position.x,obj.position.y,obj.position.z],rotation:[obj.rotation.x,obj.rotation.y,obj.rotation.z],scale:[obj.scale.x,obj.scale.y,obj.scale.z]}:x));const sel=assets.find(a=>a.id===selected);useEffect(()=>()=>assets.forEach(a=>{if(a.url)URL.revokeObjectURL(a.url)}),[]);
- return <div className="app"><header><div className="brand"><div className="logo">D</div><div><b>DepthCut</b><small>3D VIDEO EDITOR</small></div></div><input className="project" value={project} onChange={e=>setProject(e.target.value)}/><div className="actions"><button title="Undo"><Undo2/></button><button title="Redo"><Redo2/></button><button><Save/> <span>Save</span></button><button className="export"><Download/> <span>Export</span></button></div></header><div className="workspace"><aside className="sidebar">{tools.map(([n,I])=><button className={active===n?'active':''} onClick={()=>setActive(n)} key={n}><I/><span>{n}</span></button>)}<div className="spacer"/><button><Settings/><span>Settings</span></button></aside><section className="assets"><div className="panelTitle"><b>{active}</b><label className="add"><Plus/> Add Media<input ref={input} type="file" multiple accept="video/*,image/*,audio/*,.glb,.gltf,.obj" onChange={addFiles}/></label></div>{active==='3D Objects'&&<div className="primitiveBar"><button onClick={()=>addPrimitive('cube')}><Box/>Cube</button><button onClick={()=>addPrimitive('sphere')}><Circle/>Sphere</button><button onClick={()=>addPrimitive('plane')}><Square/>Plane</button></div>}<div className="assetGrid">{assets.map(a=><div className={'asset '+(selected===a.id?'selected':'')} key={a.id} onClick={()=>setSelected(a.id)}><div className="thumb">{a.kind==='video'&&<video src={a.url} muted playsInline preload="metadata"/>}{a.kind==='image'&&<img src={a.url} alt="" loading="lazy"/>}{a.kind==='audio'&&<Music/>}{a.kind==='model'&&<Box/>}{a.kind==='primitive'&&(a.shape==='sphere'?<Circle/>:a.shape==='plane'?<Square/>:<Box/>)}{a.kind==='file'&&<Film/>}</div><span title={a.name}>{a.name}</span><button className="assetDelete" onClick={e=>{e.stopPropagation();remove(a.id)}}><Trash2/></button></div>)}{!assets.length&&<div className="empty" onClick={()=>input.current?.click()}><Upload/><b>Import your media</b><small>Video · Images · Audio · GLB · GLTF · OBJ</small></div>}</div></section><main className="viewport"><div className="viewportTop"><span>Perspective</span><span className="transformTools"><button onClick={()=>setTransformMode('translate')} className={transformMode==='translate'?'activeTool':''}><Move3d/></button><button onClick={()=>setTransformMode('rotate')} className={transformMode==='rotate'?'activeTool':''}><Rotate3d/></button><button onClick={()=>setTransformMode('scale')} className={transformMode==='scale'?'activeTool':''}><Maximize2/></button></span></div><div className="scene"><Viewport assets={assets} selected={selected} setSelected={setSelected} transformMode={transformMode} onTransform={onTransform} playing={playing}/><div className="hint"><MousePointer2/> DRAG · PINCH ZOOM · SELECT</div></div><div className="transport"><button onClick={()=>setPlaying(!playing)}>{playing?<Pause fill="currentColor"/>:<Play fill="currentColor"/>}</button><span>00:00:00:00</span><div className="scrub"/></div></main><aside className="inspector"><div className="panelTitle"><b>Inspector</b></div>{sel?<div className="properties"><b>Selected object</b><p title={sel.name}>{sel.name}</p><div className="propertyGrid"><label>X<input type="number" value={sel.position[0]} onChange={e=>updateSelected('position',[+e.target.value,sel.position[1],sel.position[2]])}/></label><label>Y<input type="number" value={sel.position[1]} onChange={e=>updateSelected('position',[sel.position[0],+e.target.value,sel.position[2]])}/></label><label>Z<input type="number" value={sel.position[2]} onChange={e=>updateSelected('position',[sel.position[0],sel.position[1],+e.target.value])}/></label></div><div className="propertyGrid"><label>Rot X<input type="number" value={sel.rotation[0]} onChange={e=>updateSelected('rotation',[+e.target.value,sel.rotation[1],sel.rotation[2]])}/></label><label>Rot Y<input type="number" value={sel.rotation[1]} onChange={e=>updateSelected('rotation',[sel.rotation[0],+e.target.value,sel.rotation[2]])}/></label><label>Rot Z<input type="number" value={sel.rotation[2]} onChange={e=>updateSelected('rotation',[sel.rotation[0],sel.rotation[1],+e.target.value])}/></label></div><label>Uniform Scale<input type="number" value={sel.scale[0]} step="0.1" onChange={e=>updateSelected('scale',[+e.target.value,+e.target.value,+e.target.value])}/></label></div>:<div className="inspectorEmpty"><Layers/><b>No object selected</b><small>Select an object in the 3D viewport or Media panel.</small></div>}</aside></div><footer className="timeline"><div className="timelineHead"><b>Timeline</b><span>00:00 / 00:00</span><div><button>+</button><button>−</button></div></div><div className="tracks"><div className="trackLabels"><span>🎥 Video 1</span><span>🧊 3D Scene</span><span>🔊 Audio 1</span></div><div className="ruler"><span>00:00</span><span>00:05</span><span>00:10</span><span>00:15</span><span>00:20</span></div><div className="trackArea">{assets.slice(0,8).map((a,i)=><div className={'clip '+(selected===a.id?'clipSelected':'')} key={a.id} style={{left:(i*12)+'%',width:'10%'}} onClick={()=>setSelected(a.id)}>{a.name}</div>)}<div className="playhead"/></div></div></footer></div>}
+ const updateSelected=(key,value)=>setAssets(a=>a.map(x=>x.id===selected?{...x,[key]:value}:x));
+ const onTransform=(id,obj)=>setAssets(a=>a.map(x=>x.id===id?{...x,position:[obj.position.x,obj.position.y,obj.position.z],rotation:[obj.rotation.x,obj.rotation.y,obj.rotation.z],scale:[obj.scale.x,obj.scale.y,obj.scale.z]}:x));
+ const sel=assets.find(a=>a.id===selected);
+ useEffect(()=>()=>assets.forEach(a=>{if(a.url)URL.revokeObjectURL(a.url)}),[]);
+ return <div className="app"><header><div className="brand"><div className="logo">D</div><div><b>DepthCut</b><small>3D VIDEO EDITOR</small></div></div><input className="project" value={project} onChange={e=>setProject(e.target.value)}/><div className="actions"><button title="Undo"><Undo2/></button><button title="Redo"><Redo2/></button><button><Save/> <span>Save</span></button><button className="export"><Download/> <span>Export</span></button></div></header><div className="workspace"><aside className="sidebar">{tools.map(([n,I])=><button className={active===n?'active':''} onClick={()=>setActive(n)} key={n}><I/><span>{n}</span></button>)}<div className="spacer"/><button><Settings/><span>Settings</span></button></aside><section className="assets"><div className="panelTitle"><b>{active}</b><label className="add"><Plus/> Add Media<input ref={input} type="file" multiple accept="video/*,image/*,audio/*,.glb,.gltf,.obj" onChange={addFiles}/></label></div>{active==='3D Objects'&&<div className="primitiveBar"><button onClick={()=>addPrimitive('cube')}><Box/>Cube</button><button onClick={()=>addPrimitive('sphere')}><Circle/>Sphere</button><button onClick={()=>addPrimitive('plane')}><Square/>Plane</button></div>}<div className="assetGrid">{assets.map(a=><div className={'asset '+(selected===a.id?'selected':'')} key={a.id} onClick={()=>setSelected(a.id)}><div className="thumb">{a.kind==='video'&&<video src={a.url} muted playsInline preload="metadata"/ >}{a.kind==='image'&&<img src={a.url} alt="" loading="lazy"/>}{a.kind==='audio'&&<Music/>}{a.kind==='model'&&<Box/>}{a.kind==='primitive'&&(a.shape==='sphere'?<Circle/>:a.shape==='plane'?<Square/>:<Box/>)}{a.kind==='file'&&<Film/>}</div><span title={a.name}>{a.name}</span><button className="assetDelete" onClick={e=>{e.stopPropagation();remove(a.id)}}><Trash2/></button></div>)}{!assets.length&&<div className="empty" onClick={()=>input.current?.click()}><Upload/><b>Import your media</b><small>Video · Images · Audio · GLB · GLTF · OBJ</small></div>}</div></section><main className="viewport"><div className="viewportTop"><span>Perspective</span><span className="transformTools"><button onClick={()=>setTransformMode('translate')} className={transformMode==='translate'?'activeTool':''}><Move3d/></button><button onClick={()=>setTransformMode('rotate')} className={transformMode==='rotate'?'activeTool':''}><Rotate3d/></button><button onClick={()=>setTransformMode('scale')} className={transformMode==='scale'?'activeTool':''}><Maximize2/></button></span></div><div className="scene"><Viewport assets={assets} selected={selected} setSelected={setSelected} transformMode={transformMode} onTransform={onTransform} playing={playing}/><div className="hint"><MousePointer2/> DRAG · PINCH ZOOM · SELECT</div></div><div className="transport"><button onClick={()=>setPlaying(p=>!p)}>{playing?<Pause fill="currentColor"/>:<Play fill="currentColor"/>}</button><span>00:00:00:00</span><div className="scrub"/></div></main><aside className="inspector"><div className="panelTitle"><b>Inspector</b></div>{sel?<div className="properties"><b>Selected object</b><p title={sel.name}>{sel.name}</p><div className="propertyGrid"><label>X<input type="number" value={sel.position[0]} onChange={e=>updateSelected('position',[+e.target.value,sel.position[1],sel.position[2]])}/></label><label>Y<input type="number" value={sel.position[1]} onChange={e=>updateSelected('position',[sel.position[0],+e.target.value,sel.position[2]])}/></label><label>Z<input type="number" value={sel.position[2]} onChange={e=>updateSelected('position',[sel.position[0],sel.position[1],+e.target.value])}/></label></div><div className="propertyGrid"><label>Rot X<input type="number" value={sel.rotation[0]} onChange={e=>updateSelected('rotation',[+e.target.value,sel.rotation[1],sel.rotation[2]])}/></label><label>Rot Y<input type="number" value={sel.rotation[1]} onChange={e=>updateSelected('rotation',[sel.rotation[0],+e.target.value,sel.rotation[2]])}/></label><label>Rot Z<input type="number" value={sel.rotation[2]} onChange={e=>updateSelected('rotation',[sel.rotation[0],sel.rotation[1],+e.target.value])}/></label></div><label>Uniform Scale<input type="number" value={sel.scale[0]} step="0.1" onChange={e=>{const n=+e.target.value;updateSelected('scale',[n,n,n])}}/></label></div>:<div className="inspectorEmpty"><Layers/><b>No object selected</b><small>Select an object in the 3D viewport or Media panel.</small></div>}</aside></div><footer className="timeline"><div className="timelineHead"><b>Timeline</b><span>00:00 / 00:00</span><div><button>+</button><button>−</button></div></div><div className="tracks"><div className="trackLabels"><span>🎥 Video 1</span><span>🧊 3D Scene</span><span>🔊 Audio 1</span></div><div className="ruler"><span>00:00</span><span>00:05</span><span>00:10</span><span>00:15</span><span>00:20</span></div><div className="trackArea">{assets.slice(0,8).map((a,i)=><div className={'clip '+(selected===a.id?'clipSelected':'')} key={a.id} style={{left:(i*12)+'%',width:'10%'}} onClick={()=>setSelected(a.id)}>{a.name}</div>)}<div className="playhead"/></div></div></footer></div>}
 createRoot(document.getElementById('root')).render(<App/>);
