@@ -1,0 +1,21 @@
+import express from 'express';
+import Database from 'better-sqlite3';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const app=express();
+const dir=path.resolve('server/data');
+fs.mkdirSync(dir,{recursive:true});
+const db=new Database(path.join(dir,'depthcut.db'));
+db.pragma('journal_mode = WAL');
+db.exec(`CREATE TABLE IF NOT EXISTS projects(id TEXT PRIMARY KEY,name TEXT NOT NULL,settings TEXT NOT NULL DEFAULT '{}',created_at TEXT NOT NULL,updated_at TEXT NOT NULL); CREATE TABLE IF NOT EXISTS scenes(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,data TEXT NOT NULL DEFAULT '{}',updated_at TEXT NOT NULL);`);
+app.use(express.json({limit:'2mb'}));
+const now=()=>new Date().toISOString();
+app.get('/api/health',(req,res)=>res.json({ok:true,app:'DepthCut',version:'0.2.0'}));
+app.get('/api/projects',(req,res)=>res.json(db.prepare('SELECT * FROM projects ORDER BY updated_at DESC').all()));
+app.post('/api/projects',(req,res)=>{const id='p_'+Date.now(),t=now(),name=req.body?.name||'Untitled Project';db.prepare('INSERT INTO projects(id,name,created_at,updated_at) VALUES(?,?,?,?)').run(id,name,t,t);res.status(201).json(db.prepare('SELECT * FROM projects WHERE id=?').get(id));});
+app.put('/api/projects/:id',(req,res)=>{if(!db.prepare('SELECT id FROM projects WHERE id=?').get(req.params.id))return res.sendStatus(404);db.prepare('UPDATE projects SET name=?,settings=?,updated_at=? WHERE id=?').run(req.body?.name||'Untitled Project',JSON.stringify(req.body?.settings||{}),now(),req.params.id);res.json(db.prepare('SELECT * FROM projects WHERE id=?').get(req.params.id));});
+app.delete('/api/projects/:id',(req,res)=>{db.prepare('DELETE FROM projects WHERE id=?').run(req.params.id);res.sendStatus(204);});
+app.get('/api/projects/:id/scene',(req,res)=>res.json(db.prepare('SELECT * FROM scenes WHERE project_id=?').get(req.params.id)||{project_id:req.params.id,data:'{}'}));
+app.put('/api/projects/:id/scene',(req,res)=>{const t=now(),data=JSON.stringify(req.body||{});db.prepare('INSERT INTO scenes(id,project_id,data,updated_at) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET data=excluded.data,updated_at=excluded.updated_at').run(req.params.id,req.params.id,data,t);res.json({project_id:req.params.id,data,updated_at:t});});
+app.listen(process.env.PORT||3001,()=>console.log('DepthCut API running'));
